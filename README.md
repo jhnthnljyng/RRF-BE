@@ -1,1 +1,2 @@
-# Recipe-Sharing-Platform
+# RRF-BE
+Roommate/Room Rental Finder
