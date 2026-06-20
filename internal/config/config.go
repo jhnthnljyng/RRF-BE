@@ -10,24 +10,26 @@ import (
 )
 
 type Config struct {
-	Port     string
-	DBHost   string
-	DBPort   string
-	DBUser   string
-	DBPass   string
-	DBName   string
+	Port      string
+	DBHost    string
+	DBPort    string
+	DBUser    string
+	DBPass    string
+	DBName    string
+	JWTSecret string
 }
 
 func Load() *Config {
 	_ = godotenv.Load()
 
 	return &Config{
-		Port:   getEnv("PORT", "8080"),
-		DBHost: getEnv("DB_HOST", "localhost"),
-		DBPort: getEnv("DB_PORT", "5432"),
-		DBUser: getEnv("DB_USER", "postgres"),
-		DBPass: getEnv("DB_PASSWORD", ""),
-		DBName: getEnv("DB_NAME", "rrf"),
+		Port:      getEnv("PORT", "8000"),
+		DBHost:    getEnv("DB_HOST", "localhost"),
+		DBPort:    getEnv("DB_PORT", "5432"),
+		DBUser:    getEnv("DB_USER", "postgres"),
+		DBPass:    getEnv("DB_PASSWORD", ""),
+		DBName:    getEnv("DB_NAME", "rrf"),
+		JWTSecret: getEnv("JWT_SECRET", "change-me-in-production"),
 	}
 }
 
