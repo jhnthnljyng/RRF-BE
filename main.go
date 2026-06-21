@@ -34,7 +34,19 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	r.Static("/uploads", "./uploads")
+
 	handlers.RegisterRoutes(r, db, cfg.JWTSecret)
+
+	log.Println("Registered routes:")
+	for _, route := range r.Routes() {
+		log.Printf("  %s %s", route.Method, route.Path)
+	}
+
+	r.NoRoute(func(c *gin.Context) {
+		log.Printf("404 - no route matched: %s %s", c.Request.Method, c.Request.URL.Path)
+		c.JSON(404, gin.H{"error": "route not found"})
+	})
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

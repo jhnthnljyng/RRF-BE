@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jhnthnljyng/rrf-be/internal/middleware"
 )
 
 func RegisterRoutes(r *gin.Engine, db *sql.DB, jwtSecret string) {
@@ -18,8 +19,11 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, jwtSecret string) {
 		auth.POST("/login", Login(db, jwtSecret))
 	}
 
-	api := r.Group("/api/v1")
+	r.GET("/api/listings", GetListings(db))
+
+	api := r.Group("/api")
+	api.Use(middleware.RequireAuth(jwtSecret))
 	{
-		_ = api
+		api.POST("/listings", CreateProperty(db))
 	}
 }
