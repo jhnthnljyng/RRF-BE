@@ -52,6 +52,7 @@ func CreateProperty(db *sql.DB, ownerID int, req *models.CreatePropertyRequest) 
 		&p.Furnishing, &p.MaxOccupants, &p.AvailableFrom, &p.GenderPref,
 		&p.Bedrooms, &p.Bathrooms, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
 	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -153,6 +154,56 @@ func GetAllProperties(db *sql.DB, roomType, location string) ([]map[string]inter
 	}
 
 	return properties, nil
+}
+
+func GetPropertyByID(db *sql.DB, id int) (map[string]interface{}, error) {
+	p := &models.Property{}
+	err := db.QueryRow(`
+		SELECT id, owner_id, title, description, location, monthly_rent, room_type,
+		       furnishing, max_occupants, available_from, gender_preference,
+		       bedrooms, bathrooms, is_active, created_at, updated_at
+		FROM properties
+		WHERE id = $1 AND is_active = TRUE`, id,
+	).Scan(
+		&p.ID, &p.OwnerID, &p.Title, &p.Description, &p.Location, &p.MonthlyRent, &p.RoomType,
+		&p.Furnishing, &p.MaxOccupants, &p.AvailableFrom, &p.GenderPref,
+		&p.Bedrooms, &p.Bathrooms, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	amenities, err := getPropertyAmenities(db, p.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	images, err := getPropertyImages(db, p.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"id":               p.ID,
+		"owner_id":         p.OwnerID,
+		"title":            p.Title,
+		"description":      p.Description,
+		"location":         p.Location,
+		"price":            p.MonthlyRent,
+		"type":             p.RoomType,
+		"furnishing":       p.Furnishing,
+		"maxOccupants":     p.MaxOccupants,
+		"availableFrom":    p.AvailableFrom,
+		"genderPreference": p.GenderPref,
+		"bedrooms":         p.Bedrooms,
+		"bathrooms":        p.Bathrooms,
+		"amenities":        amenities,
+		"images":           images,
+		"created_at":       p.CreatedAt,
+	}, nil
 }
 
 func getPropertyAmenities(db *sql.DB, propertyID int) ([]string, error) {

@@ -20,10 +20,15 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, jwtSecret string) {
 	}
 
 	r.GET("/api/listings", GetListings(db))
+	r.GET("/api/listings/:id", GetListingByID(db))
 
 	api := r.Group("/api")
 	api.Use(middleware.RequireAuth(jwtSecret))
 	{
+		api.GET("/user/profile", GetProfile(db))
+		api.PUT("/user/profile", UpdateProfile(db))
+		api.POST("/user/profile/picture", UploadProfilePicture(db))
 		api.POST("/listings", CreateProperty(db))
+		api.POST("/images/upload", UploadImages(db))
 	}
 }
