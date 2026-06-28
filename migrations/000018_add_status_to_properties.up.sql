@@ -1,0 +1,1 @@
+ALTER TABLE properties ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'available';

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,48 @@ func UpdateProfile(db *sql.DB) gin.HandlerFunc {
 			"message": "profile updated successfully",
 			"user":    user,
 		})
+	}
+}
+
+func GetUserByID(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+			return
+		}
+
+		user, err := repository.GetUserByID(db, id)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+				return
+			}
+			log.Printf("get user by id error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not fetch user"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"user": user})
+	}
+}
+
+func SearchUsers(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		q := c.Query("q")
+		if q == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter q is required"})
+			return
+		}
+
+		users, err := repository.SearchUsers(db, q)
+		if err != nil {
+			log.Printf("search users error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not search users"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"users": users, "total": len(users)})
 	}
 }
 

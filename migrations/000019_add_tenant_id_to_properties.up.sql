@@ -1,0 +1,1 @@
+ALTER TABLE properties ADD COLUMN tenant_id INTEGER REFERENCES users(id) ON DELETE SET NULL;

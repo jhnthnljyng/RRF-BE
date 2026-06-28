@@ -150,6 +150,43 @@ func GetUserByEmail(db *sql.DB, email string) (*models.User, string, error) {
 	return user, passwordHash, nil
 }
 
+func SearchUsers(db *sql.DB, q string) ([]map[string]interface{}, error) {
+	rows, err := db.Query(`
+		SELECT id, full_name, username, avatar_url, role
+		FROM users
+		WHERE is_active = TRUE
+		  AND (full_name ILIKE $1 OR username ILIKE $1 OR email ILIKE $1)
+		ORDER BY full_name
+		LIMIT 20`,
+		"%"+q+"%",
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var fullName, username, role string
+		var avatarURL *string
+		if err := rows.Scan(&id, &fullName, &username, &avatarURL, &role); err != nil {
+			return nil, err
+		}
+		users = append(users, map[string]interface{}{
+			"id":         id,
+			"full_name":  fullName,
+			"username":   username,
+			"avatar_url": avatarURL,
+			"role":       role,
+		})
+	}
+	if users == nil {
+		users = []map[string]interface{}{}
+	}
+	return users, nil
+}
+
 func CreateUser(db *sql.DB, req *models.RegisterRequest, passwordHash string) (*models.User, error) {
 	var exists bool
 

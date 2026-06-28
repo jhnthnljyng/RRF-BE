@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,13 +45,13 @@ func CreateProperty(db *sql.DB, ownerID int, req *models.CreatePropertyRequest) 
 			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, owner_id, title, description, location, monthly_rent, room_type,
 		          furnishing, max_occupants, available_from, gender_preference,
-		          bedrooms, bathrooms, is_active, created_at, updated_at`,
+		          bedrooms, bathrooms, status, tenant_id, is_active, created_at, updated_at`,
 		ownerID, req.Title, description, req.Location, req.Price, req.Type, furnishing,
 		req.MaxOccupants, availableFrom, genderPref, req.Bedrooms, req.Bathrooms,
 	).Scan(
 		&p.ID, &p.OwnerID, &p.Title, &p.Description, &p.Location, &p.MonthlyRent, &p.RoomType,
 		&p.Furnishing, &p.MaxOccupants, &p.AvailableFrom, &p.GenderPref,
-		&p.Bedrooms, &p.Bathrooms, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
+		&p.Bedrooms, &p.Bathrooms, &p.Status, &p.TenantID, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
 	)
 
 	if err != nil {
@@ -78,31 +79,167 @@ func CreateProperty(db *sql.DB, ownerID int, req *models.CreatePropertyRequest) 
 	return p, nil
 }
 
-func GetAllProperties(db *sql.DB, roomType, location string) ([]map[string]interface{}, error) {
-	query := `
+func UpdatePropertyStatus(db *sql.DB, propertyID, ownerID int, status string, tenantID *int) error {
+	var currentOwner int
+	err := db.QueryRow(`SELECT owner_id FROM properties WHERE id = $1`, propertyID).Scan(&currentOwner)
+	if err == sql.ErrNoRows {
+		return sql.ErrNoRows
+	}
+	if err != nil {
+		return err
+	}
+	if currentOwner != ownerID {
+		return errors.New("forbidden")
+	}
+
+	_, err = db.Exec(
+		`UPDATE properties SET status = $1, tenant_id = $2, updated_at = NOW() WHERE id = $3`,
+		status, tenantID, propertyID,
+	)
+	return err
+}
+
+func DeleteProperty(db *sql.DB, propertyID, ownerID int) error {
+	var currentOwner int
+	err := db.QueryRow(`SELECT owner_id FROM properties WHERE id = $1`, propertyID).Scan(&currentOwner)
+	if err == sql.ErrNoRows {
+		return sql.ErrNoRows
+	}
+	if err != nil {
+		return err
+	}
+	if currentOwner != ownerID {
+		return errors.New("forbidden")
+	}
+
+	_, err = db.Exec(`UPDATE properties SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, propertyID)
+	return err
+}
+
+func UpdateProperty(db *sql.DB, propertyID, ownerID int, req *models.UpdatePropertyRequest) (map[string]interface{}, error) {
+	var currentOwner int
+	err := db.QueryRow(`SELECT owner_id FROM properties WHERE id = $1`, propertyID).Scan(&currentOwner)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if currentOwner != ownerID {
+		return nil, errors.New("forbidden")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var availableFrom *time.Time
+	if req.AvailableFrom != "" {
+		t, err := time.Parse("2006-01-02", req.AvailableFrom)
+		if err != nil {
+			return nil, err
+		}
+		availableFrom = &t
+	}
+
+	var description, roomType, furnishing, genderPref, location, status *string
+	if req.Description != "" {
+		description = &req.Description
+	}
+	if req.Type != "" {
+		roomType = &req.Type
+	}
+	if req.Furnishing != "" {
+		furnishing = &req.Furnishing
+	}
+	if req.GenderPref != "" {
+		genderPref = &req.GenderPref
+	}
+	if req.Location != "" {
+		location = &req.Location
+	}
+	if req.Status != "" {
+		status = &req.Status
+	}
+
+	var price *float64
+	if req.Price > 0 {
+		price = &req.Price
+	}
+
+	_, err = tx.Exec(`
+		UPDATE properties SET
+			title             = COALESCE(NULLIF($1, ''), title),
+			description       = COALESCE($2, description),
+			location          = COALESCE($3, location),
+			monthly_rent      = COALESCE($4, monthly_rent),
+			room_type         = COALESCE($5::room_type, room_type),
+			furnishing        = COALESCE($6::furnishing_type, furnishing),
+			max_occupants     = COALESCE($7, max_occupants),
+			available_from    = COALESCE($8, available_from),
+			gender_preference = COALESCE($9::gender_preference_type, gender_preference),
+			bedrooms          = COALESCE($10, bedrooms),
+			bathrooms         = COALESCE($11, bathrooms),
+			is_active         = COALESCE($12, is_active),
+			status            = COALESCE($13, status),
+			updated_at        = NOW()
+		WHERE id = $14`,
+		req.Title, description, location, price, roomType, furnishing,
+		req.MaxOccupants, availableFrom, genderPref,
+		req.Bedrooms, req.Bathrooms, req.IsActive, status, propertyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Amenities != nil {
+		if _, err := tx.Exec(`DELETE FROM property_amenities WHERE property_id = $1`, propertyID); err != nil {
+			return nil, err
+		}
+		for _, amenity := range req.Amenities {
+			if amenity == "" {
+				continue
+			}
+			if _, err := tx.Exec(
+				`INSERT INTO property_amenities (property_id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				propertyID, amenity,
+			); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if req.Images != nil {
+		if _, err := tx.Exec(`DELETE FROM property_images WHERE property_id = $1`, propertyID); err != nil {
+			return nil, err
+		}
+		for i, url := range req.Images {
+			if _, err := tx.Exec(
+				`INSERT INTO property_images (property_id, url, is_primary, display_order) VALUES ($1, $2, $3, $4)`,
+				propertyID, url, i == 0, i,
+			); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return GetPropertyByID(db, propertyID)
+}
+
+func GetPropertiesByOwner(db *sql.DB, ownerID int) ([]map[string]interface{}, error) {
+	rows, err := db.Query(`
 		SELECT id, owner_id, title, description, location, monthly_rent, room_type,
 		       furnishing, max_occupants, available_from, gender_preference,
-		       bedrooms, bathrooms, is_active, created_at, updated_at
+		       bedrooms, bathrooms, status, tenant_id, is_active, created_at, updated_at
 		FROM properties
-		WHERE is_active = TRUE`
-
-	args := []interface{}{}
-	argIdx := 1
-
-	if roomType != "" {
-		query += fmt.Sprintf(" AND room_type = $%d", argIdx)
-		args = append(args, roomType)
-		argIdx++
-	}
-	if location != "" {
-		query += fmt.Sprintf(" AND location ILIKE $%d", argIdx)
-		args = append(args, "%"+location+"%")
-		argIdx++
-	}
-
-	query += " ORDER BY created_at DESC"
-
-	rows, err := db.Query(query, args...)
+		WHERE owner_id = $1
+		ORDER BY created_at DESC`, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +251,7 @@ func GetAllProperties(db *sql.DB, roomType, location string) ([]map[string]inter
 		if err := rows.Scan(
 			&p.ID, &p.OwnerID, &p.Title, &p.Description, &p.Location, &p.MonthlyRent, &p.RoomType,
 			&p.Furnishing, &p.MaxOccupants, &p.AvailableFrom, &p.GenderPref,
-			&p.Bedrooms, &p.Bathrooms, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
+			&p.Bedrooms, &p.Bathrooms, &p.Status, &p.TenantID, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -143,6 +280,97 @@ func GetAllProperties(db *sql.DB, roomType, location string) ([]map[string]inter
 			"genderPreference": p.GenderPref,
 			"bedrooms":         p.Bedrooms,
 			"bathrooms":        p.Bathrooms,
+			"status":           p.Status,
+			"tenant_id":        p.TenantID,
+			"amenities":        amenities,
+			"images":           images,
+			"is_active":        p.IsActive,
+			"created_at":       p.CreatedAt,
+		})
+	}
+
+	if properties == nil {
+		properties = []map[string]interface{}{}
+	}
+
+	return properties, nil
+}
+
+func GetAllProperties(db *sql.DB, roomType, location string) ([]map[string]interface{}, error) {
+	query := `
+		SELECT p.id, p.owner_id, p.title, p.description, p.location, p.monthly_rent, p.room_type,
+		       p.furnishing, p.max_occupants, p.available_from, p.gender_preference,
+		       p.bedrooms, p.bathrooms, p.status, p.tenant_id, p.is_active, p.created_at, p.updated_at,
+		       u.full_name, u.phone
+		FROM properties p
+		JOIN users u ON u.id = p.owner_id
+		WHERE p.is_active = TRUE`
+
+	args := []interface{}{}
+	argIdx := 1
+
+	if roomType != "" {
+		query += fmt.Sprintf(" AND p.room_type = $%d", argIdx)
+		args = append(args, roomType)
+		argIdx++
+	}
+	if location != "" {
+		query += fmt.Sprintf(" AND p.location ILIKE $%d", argIdx)
+		args = append(args, "%"+location+"%")
+		argIdx++
+	}
+
+	query += " ORDER BY p.created_at DESC"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var properties []map[string]interface{}
+	for rows.Next() {
+		p := &models.Property{}
+		var ownerName string
+		var ownerPhone *string
+		if err := rows.Scan(
+			&p.ID, &p.OwnerID, &p.Title, &p.Description, &p.Location, &p.MonthlyRent, &p.RoomType,
+			&p.Furnishing, &p.MaxOccupants, &p.AvailableFrom, &p.GenderPref,
+			&p.Bedrooms, &p.Bathrooms, &p.Status, &p.TenantID, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
+			&ownerName, &ownerPhone,
+		); err != nil {
+			return nil, err
+		}
+
+		amenities, err := getPropertyAmenities(db, p.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		images, err := getPropertyImages(db, p.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		properties = append(properties, map[string]interface{}{
+			"id":               p.ID,
+			"owner_id":         p.OwnerID,
+			"owner_name":       ownerName,
+			"owner_phone":      ownerPhone,
+			"title":            p.Title,
+			"description":      p.Description,
+			"location":         p.Location,
+			"price":            p.MonthlyRent,
+			"type":             p.RoomType,
+			"furnishing":       p.Furnishing,
+			"maxOccupants":     p.MaxOccupants,
+			"availableFrom":    p.AvailableFrom,
+			"genderPreference": p.GenderPref,
+			"bedrooms":         p.Bedrooms,
+			"bathrooms":        p.Bathrooms,
+			"status":           p.Status,
+			"tenant_id":        p.TenantID,
+			"is_active":        p.IsActive,
 			"amenities":        amenities,
 			"images":           images,
 			"created_at":       p.CreatedAt,
@@ -158,16 +386,21 @@ func GetAllProperties(db *sql.DB, roomType, location string) ([]map[string]inter
 
 func GetPropertyByID(db *sql.DB, id int) (map[string]interface{}, error) {
 	p := &models.Property{}
+	var ownerName string
+	var ownerPhone *string
 	err := db.QueryRow(`
-		SELECT id, owner_id, title, description, location, monthly_rent, room_type,
-		       furnishing, max_occupants, available_from, gender_preference,
-		       bedrooms, bathrooms, is_active, created_at, updated_at
-		FROM properties
-		WHERE id = $1 AND is_active = TRUE`, id,
+		SELECT p.id, p.owner_id, p.title, p.description, p.location, p.monthly_rent, p.room_type,
+		       p.furnishing, p.max_occupants, p.available_from, p.gender_preference,
+		       p.bedrooms, p.bathrooms, p.status, p.tenant_id, p.is_active, p.created_at, p.updated_at,
+		       u.full_name, u.phone
+		FROM properties p
+		JOIN users u ON u.id = p.owner_id
+		WHERE p.id = $1 AND p.is_active = TRUE`, id,
 	).Scan(
 		&p.ID, &p.OwnerID, &p.Title, &p.Description, &p.Location, &p.MonthlyRent, &p.RoomType,
 		&p.Furnishing, &p.MaxOccupants, &p.AvailableFrom, &p.GenderPref,
-		&p.Bedrooms, &p.Bathrooms, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
+		&p.Bedrooms, &p.Bathrooms, &p.Status, &p.TenantID, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
+		&ownerName, &ownerPhone,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -189,6 +422,8 @@ func GetPropertyByID(db *sql.DB, id int) (map[string]interface{}, error) {
 	return map[string]interface{}{
 		"id":               p.ID,
 		"owner_id":         p.OwnerID,
+		"owner_name":       ownerName,
+		"owner_phone":      ownerPhone,
 		"title":            p.Title,
 		"description":      p.Description,
 		"location":         p.Location,
@@ -200,6 +435,8 @@ func GetPropertyByID(db *sql.DB, id int) (map[string]interface{}, error) {
 		"genderPreference": p.GenderPref,
 		"bedrooms":         p.Bedrooms,
 		"bathrooms":        p.Bathrooms,
+		"status":           p.Status,
+		"tenant_id":        p.TenantID,
 		"amenities":        amenities,
 		"images":           images,
 		"created_at":       p.CreatedAt,

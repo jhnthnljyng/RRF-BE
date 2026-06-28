@@ -16,9 +16,29 @@ type Property struct {
 	GenderPref    string     `json:"genderPreference"`
 	Bedrooms      *int       `json:"bedrooms,omitempty"`
 	Bathrooms     *int       `json:"bathrooms,omitempty"`
+	Status        string     `json:"status"`
+	TenantID      *int       `json:"tenant_id"`
 	IsActive      bool       `json:"is_active"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+type UpdatePropertyRequest struct {
+	Title         string   `json:"title"`
+	Description   string   `json:"description"`
+	Location      string   `json:"location"`
+	Price         float64  `json:"price"`
+	Type          string   `json:"type"             binding:"omitempty,oneof=single shared studio apartment house room whole_unit looking_for_roommate"`
+	Furnishing    string   `json:"furnishing"       binding:"omitempty,oneof=furnished unfurnished partial"`
+	MaxOccupants  *int     `json:"maxOccupants"`
+	AvailableFrom string   `json:"availableFrom"`
+	GenderPref    string   `json:"genderPreference" binding:"omitempty,oneof=male female any"`
+	Bedrooms      *int     `json:"bedrooms"`
+	Bathrooms     *int     `json:"bathrooms"`
+	Status        string   `json:"status"`
+	Amenities     []string `json:"amenities"`
+	Images        []string `json:"images"`
+	IsActive      *bool    `json:"is_active"`
 }
 
 type CreatePropertyRequest struct {
